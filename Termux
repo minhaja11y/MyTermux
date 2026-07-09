@@ -1,0 +1,114 @@
+#!/bin/bash
+
+# Colors for professional hacker aesthetic
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
+
+clear
+echo -e "${CYAN}==================================================${NC}"
+echo -e "${GREEN}    REDMI NOTE 12 PRO+ EXACT PATH MODULE MAKER    ${NC}"
+echo -e "${CYAN}==================================================${NC}"
+echo ""
+
+# Paths based on MT Manager Analysis
+DOWNLOAD_DIR="/sdcard/Download"
+INPUT_VIDEO="$DOWNLOAD_DIR/boot.mp4"
+WORK_DIR="$HOME/bootanim_workspace"
+MOD_DIR="$WORK_DIR/module"
+ANIM_FOLDER_NAME="bootanimation.zip.folder"
+
+# Check for input video
+if [ ! -f "$INPUT_VIDEO" ]; then
+    echo -e "${RED}[ERROR] 'boot.mp4' not found in Download folder!${NC}"
+    echo -e "${YELLOW}[HINT] Please place your video in Download folder and rename it to boot.mp4${NC}"
+    exit 1
+fi
+
+# Ask user for a unique module name to prevent overwriting
+echo -e "${CYAN}[?] Enter a unique name for this Boot Animation Module:${NC}"
+echo -e "${YELLOW}(Example: EvolutionX, Pixel, Fluid - No spaces allowed)${NC}"
+read -p ">> " USER_MOD_NAME
+
+# Fallback if empty
+if [ -z "$USER_MOD_NAME" ]; then
+    USER_MOD_NAME="ROM_BootAnim_$(date +%s)"
+fi
+
+# Sanitize module ID
+MOD_ID=$(echo "$USER_MOD_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_')
+MOD_TITLE="$USER_MOD_NAME Boot Animation"
+
+# Clean old workspace
+rm -rf "$WORK_DIR"
+mkdir -p "$WORK_DIR/$ANIM_FOLDER_NAME/part0"
+
+echo -e "${GREEN}[+] Processing frames to exact 1080x2400 resolution...${NC}"
+# Forcing 1080x2400 raw scaling for complete full-screen display
+ffmpeg -i "$INPUT_VIDEO" -vf "scale=1080:2400" -r 30 "$WORK_DIR/$ANIM_FOLDER_NAME/part0/%04d.jpg" > /dev/null 2>&1
+
+if [ ! "$(ls -A "$WORK_DIR/$ANIM_FOLDER_NAME/part0")" ]; then
+    echo -e "${RED}[ERROR] Failed to extract video frames. Video file might be corrupted.${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}[+] Writing desc.txt parameters (1080x2400 @ 30 FPS)...${NC}"
+cat <<EOF > "$WORK_DIR/$ANIM_FOLDER_NAME/desc.txt"
+1080 2400 30
+p 1 0 part0
+EOF
+
+# Ensure UNIX line endings (Crucial for Android boot components)
+sed -i 's/\r$//' "$WORK_DIR/$ANIM_FOLDER_NAME/desc.txt"
+
+echo -e "${GREEN}[+] Packaging bootanimation.zip with Stored compression...${NC}"
+cd "$WORK_DIR/$ANIM_FOLDER_NAME" || exit
+zip -r0 "../bootanimation.zip" ./desc.txt ./part0 > /dev/null
+cd "$HOME" || exit
+
+echo -e "${GREEN}[+] Building verified path: system/product/media/...${NC}"
+# Correcting directory routing according to IMG-20260602-WA0004.jpg
+mkdir -p "$MOD_DIR/system/product/media"
+cp "$WORK_DIR/bootanimation.zip" "$MOD_DIR/system/product/media/bootanimation.zip"
+
+# Create module.prop
+cat <<EOF > "$MOD_DIR/module.prop"
+id=product_media_$MOD_ID
+name=$MOD_TITLE
+version=v2.0
+versionCode=4
+author=Minhaj Hacker
+description=Fixed full-screen boot animation injected specifically into system/product/media/ for custom ROMs.
+EOF
+
+# Create customize.sh with strict execution permissions
+cat <<EOF > "$MOD_DIR/customize.sh"
+SKIPUNZIP=0
+ui_print "- Granting 0644 permission to system/product/media/bootanimation.zip"
+set_perm \$MODPATH/system/product/media/bootanimation.zip 0 0 0644
+ui_print "- Permission injection completed!"
+EOF
+
+echo -e "${GREEN}[+] Packaging final Magisk flashable module...${NC}"
+OUTPUT_ZIP="$DOWNLOAD_DIR/${USER_MOD_NAME}_BootAnim_Magisk.zip"
+rm -f "$OUTPUT_ZIP"
+
+cd "$MOD_DIR" || exit
+zip -r "$OUTPUT_ZIP" ./* > /dev/null
+
+# Success Check
+if [ -f "$OUTPUT_ZIP" ]; then
+    echo ""
+    echo -e "${CYAN}==================================================${NC}"
+    echo -e "${GREEN}  SUCCESS: Module mapped to product partition!${NC}"
+    echo -e "${GREEN}  Output: Download/$(basename "$OUTPUT_ZIP")${NC}"
+    echo -e "${YELLOW}  Note: Dynamic ID active (product_media_$MOD_ID)${NC}"
+    echo -e "${CYAN}==================================================${NC}"
+else
+    echo -e "${RED}[ERROR] Execution failed. Check Termux storage rights.${NC}"
+fi
+
+# Cleanup
+rm -rf "$WORK_DIR"
